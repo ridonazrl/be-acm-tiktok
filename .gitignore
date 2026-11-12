@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+
+# Environment
+.env
+.env.*
+
+# Logs & Debug
+*.log
+debug_*.png
+comment_history.json
+
+# OS
+.DS_Store
+Thumbs.db

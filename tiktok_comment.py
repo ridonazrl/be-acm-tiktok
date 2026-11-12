@@ -102,142 +102,167 @@ def save_history(entry: dict):
 # ─────────────────────────────────────────────────────────────
 
 def post_comment(account_name: str, url: str, comment: str) -> dict:
-    """
-    Kirim satu komentar ke video TikTok menggunakan akun yang terhubung via CDP.
+    """Post comment via Visual Click + Trik Spasi (Simpel)"""
+    import time
+    from playwright.sync_api import sync_playwright
 
-    Returns:
-        dict dengan keys: success (bool), account, comment, error (opsional)
-    """
-    if account_name not in ACCOUNT_PORT_MAP:
-        return {
-            "success": False,
-            "account": account_name,
-            "comment": comment,
-            "error": f"Akun '{account_name}' tidak ada di mapping",
-        }
+    try:
+        if account_name.lower().startswith("akun"):
+            num = int(account_name.lower().replace("akun", ""))
+        else:
+            num = int(account_name)
+        port = 9221 + num
+    except Exception:
+        return {"success": False, "error": f"Invalid account: {account_name}"}
 
-    port = ACCOUNT_PORT_MAP[account_name]
-    cdp_url = f"http://{HOST_IP}:{port}"
-    name = DISPLAY_NAMES.get(account_name, account_name)
+    cdp_url = f"http://172.18.0.1:{port}"
+    max_retries = 3
 
-    print(f"\n{'='*55}")
-    print(f"[*] Akun   : {name} ({account_name}) — Port {port}")
-    print(f"[*] URL    : {url}")
-    print(f"[*] Comment: {comment}")
-    print(f"{'='*55}")
+    def is_comment_panel_open(page):
+        selectors = [
+            'div[contenteditable="true"]',
+            '[data-e2e="comment-input"]',
+            'div[role="textbox"]',
+            '[data-e2e="comment-list"]',
+        ]
+        for sel in selectors:
+            try:
+                if page.locator(sel).count() > 0:
+                    return True
+            except: continue
+        return False
 
-    with sync_playwright() as p:
-        try:
-            # 1. Connect ke Chrome Windows via CDP
-            print(f"[*] Connecting ke CDP: {cdp_url} ...")
+    def click_comment_icon(page):
+        icon_selectors = [
+            '[data-e2e="comment-icon"]',
+            'div[data-e2e="comment-icon"]',
+            'button[data-e2e="comment-icon"]',
+        ]
+        for selector in icon_selectors:
+            try:
+                locator = page.locator(selector).first
+                locator.wait_for(state="visible", timeout=5000)
+                box = locator.bounding_box()
+                if not box: continue
+                
+                page.evaluate("""(sel) => {
+                    const el = document.querySelector(sel);
+                    if (el) el.scrollIntoView({block: 'center'});
+                }""", selector)
+                time.sleep(0.4)
+                
+                box = locator.bounding_box()
+                if not box: continue
+                
+                cx = box["x"] + box["width"] / 2
+                cy = box["y"] + box["height"] / 2
+                page.mouse.click(cx, cy)
+                time.sleep(1.2)
+                return True
+            except: continue
+        return False
+
+    try:
+        with sync_playwright() as p:
             browser = p.chromium.connect_over_cdp(cdp_url)
+            if not browser.contexts:
+                return {"success": False, "error": "No browser context"}
+            
             context = browser.contexts[0]
             page = context.pages[0] if context.pages else context.new_page()
 
-            # 2. Buka video
-            print(f"[*] Navigasi ke video...")
-            page.goto(url, timeout=60000)
-            print("[*] Tunggu 5 detik agar halaman ter-load...")
-            time.sleep(5)
+            # 1. Buka URL
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            time.sleep(4)
 
-            # 3. Gerak mouse natural
-            page.mouse.move(random.randint(200, 600), random.randint(200, 500))
-            time.sleep(random.uniform(0.8, 1.5))
+            # 2. Buka Panel Komentar
+            panel_opened = False
+            for attempt in range(1, max_retries + 1):
+                print(f"[Attempt {attempt}] Klik comment-icon...")
+                if not click_comment_icon(page):
+                    return {"success": False, "error": "Gagal menemukan comment-icon"}
+                
+                if is_comment_panel_open(page):
+                    panel_opened = True
+                    print("[+] Panel komentar terbuka.")
+                    break
+                else:
+                    print("[!] Panel belum terbuka, coba lagi...")
+                    time.sleep(1.0)
 
-            # 4. Scroll sedikit ke bawah (supaya comment section muncul)
-            page.evaluate("window.scrollBy(0, 300)")
-            time.sleep(1.5)
+            if not panel_opened:
+                return {"success": False, "error": "Panel gagal terbuka"}
 
-            # 5. Cari input komentar
-            print("[*] Mencari kolom komentar...")
-            comment_input = None
-            for sel in COMMENT_INPUT_SELECTORS:
+            time.sleep(0.8)
+
+            # 3. Cari Input & Ketik + Spasi (KODE GROK BARU)
+            input_selectors = [
+                'div[contenteditable="true"]',
+                '[data-e2e="comment-input"]',
+                'div[role="textbox"]',
+            ]
+            input_el = None
+            for sel in input_selectors:
                 try:
-                    el = page.locator(sel).first
-                    if el.count() > 0:
-                        el.wait_for(state="visible", timeout=5000)
-                        comment_input = el
-                        print(f"[+] Kolom komentar ditemukan: {sel}")
+                    loc = page.locator(sel).first
+                    if loc.count() > 0:
+                        loc.wait_for(state="visible", timeout=5000)
+                        input_el = loc
                         break
-                except Exception:
-                    continue
+                except: continue
 
-            if comment_input is None:
-                # Screenshot untuk debug
-                debug_path = f"debug_comment_{account_name}_{int(time.time())}.png"
-                page.screenshot(path=debug_path)
-                return {
-                    "success": False,
-                    "account": account_name,
-                    "comment": comment,
-                    "error": f"Kolom komentar tidak ditemukan. Screenshot: {debug_path}",
-                }
+            if not input_el:
+                return {"success": False, "error": "Kolom input tidak ditemukan"}
 
-            # 6. Klik dan ketik komentar (seperti manusia)
-            comment_input.click()
-            time.sleep(random.uniform(0.5, 1.0))
+            input_el.click(force=True)
+            time.sleep(0.3)
+            
+            # Ketik teks + SPASI (Jangan dihapus!)
+            print("[*] Mengetik komentar + spasi...")
+            full_text = comment + " "
+            page.keyboard.type(full_text, delay=25)
+            time.sleep(0.5) # Jeda biar tombol merah
 
-            # Ketik karakter per karakter dengan jeda acak (anti-detect)
-            for char in comment:
-                comment_input.type(char, delay=random.randint(50, 150))
-
-            print(f"[+] Komentar diketik: '{comment}'")
-            time.sleep(random.uniform(1.0, 2.0))
-
-            # 7. Cari dan klik tombol post
-            print("[*] Mencari tombol kirim...")
+            # 4. Klik Submit
+            submit_selectors = [
+                '[data-e2e="comment-post"]',
+                'button[data-e2e="comment-post"]',
+                'div[data-e2e="comment-post"]',
+                '[data-e2e="comment-post-button"]',
+            ]
             submitted = False
-            for sel in SUBMIT_BUTTON_SELECTORS:
+            for sel in submit_selectors:
                 try:
                     btn = page.locator(sel).first
                     if btn.count() > 0:
-                        btn.wait_for(state="visible", timeout=3000)
-                        btn.click(timeout=5000)
-                        submitted = True
-                        print(f"[+] Tombol kirim diklik: {sel}")
-                        break
-                except Exception:
-                    continue
+                        box = btn.bounding_box()
+                        if box:
+                            cx = box["x"] + box["width"] / 2
+                            cy = box["y"] + box["height"] / 2
+                            page.mouse.click(cx, cy)
+                            submitted = True
+                            print(f"[+] Tombol submit diklik via {sel}")
+                            break
+                        else:
+                            btn.click(force=True)
+                            submitted = True
+                            break
+                except: continue
 
-            # Fallback: tekan Enter
             if not submitted:
-                print("[*] Tombol tidak ditemukan, coba tekan Enter...")
-                comment_input.press("Enter")
-                submitted = True
+                try:
+                    page.keyboard.press("Enter")
+                    submitted = True
+                except: pass
 
-            time.sleep(random.uniform(2.0, 3.0))
+            if not submitted:
+                return {"success": False, "error": "Tombol submit gagal diklik"}
 
-            if submitted:
-                print(f"[✅] Komentar berhasil dikirim untuk {name}!")
-                return {
-                    "success": True,
-                    "account": account_name,
-                    "comment": comment,
-                }
-            else:
-                return {
-                    "success": False,
-                    "account": account_name,
-                    "comment": comment,
-                    "error": "Gagal menemukan tombol kirim",
-                }
+            time.sleep(2.0)
+            return {"success": True, "message": "Comment posted"}
 
-        except Exception as e:
-            print(f"[!] Exception: {e}")
-            return {
-                "success": False,
-                "account": account_name,
-                "comment": comment,
-                "error": str(e),
-            }
-        finally:
-            # Jangan close browser — CDP hanya lepas koneksi
-            pass
-
-
-# ─────────────────────────────────────────────────────────────
-# Orkestrasi multi-akun
-# ─────────────────────────────────────────────────────────────
+    except Exception as e:
+        return {"success": False, "error": f"Unexpected error: {e}"}
 
 def run_auto_comment(
     url: str,

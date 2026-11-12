@@ -24,7 +24,7 @@ GROK_API_KEY   = os.getenv("GROK_API_KEY", "")
 
 # Model default per provider
 GEMINI_MODEL = "gemini-3.8-flash"
-GROK_MODEL   = "grok-3-mini"                   # atau "grok-3" untuk yang lebih pintar
+GROK_MODEL   = "openai/gpt-oss-120b"                   # atau "grok-3" untuk yang lebih pintar
 
 # ─────────────────────────────────────────────────────────────
 # Prompt templates
@@ -107,7 +107,7 @@ def _init_grok():
         )
     return OpenAI(
         api_key=GROK_API_KEY,
-        base_url="https://api.x.ai/v1",
+        base_url="https://api.groq.com/openai/v1",
     )
 
 
@@ -116,9 +116,14 @@ def _generate_grok(client, prompt: str) -> str:
         model=GROK_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.9,
-        max_tokens=150,
+        max_tokens=1000,  # <--- Naikin biar gak kosong
+        extra_body={"reasoning_effort": "low"}  # <--- Biar cepet & gak abis token
     )
-    return response.choices[0].message.content.strip().strip('"').strip("'")
+    content = response.choices[0].message.content
+    if not content:
+        print(f"⚠️ Groq balikin content kosong. Reasoning: {response.choices[0].message.reasoning}")
+        raise Exception("Groq gagal generate teks (content kosong)")
+    return content.strip().strip('"').strip("'")
 
 
 # ─────────────────────────────────────────────────────────────
